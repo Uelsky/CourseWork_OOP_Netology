@@ -1,3 +1,8 @@
+# Для работоспособности кода создайте в корне репозитория файл settings.ini по шаблону:
+# [VK]
+# VK_TOKEN=<ваш токен вк без ковычек>
+
+
 import requests
 import configparser
 from pprint import pprint
