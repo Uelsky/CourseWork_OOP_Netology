@@ -1,6 +1,6 @@
-# Для работоспособности кода создайте в корне репозитория файл settings.ini по шаблону:
+# For the code to work, create a settings.ini file in the root of the repository using the template:
 # [VK]
-# VK_TOKEN=<ваш токен вк без ковычек>
+# VK_TOKEN=<your vk token without quotes>
 
 
 import requests
@@ -21,8 +21,6 @@ config = configparser.ConfigParser()
 config.read("settings.ini")
 
 VK_TOKEN = config["VK"]["VK_TOKEN"]
-VK_APP_ID = '52202339'
-DISK_APP_ID = '3810293e5664403584c8d71d9436030c'
 USER_ID = int(input())
 DISK_TOKEN = input()
 count = int(input())
@@ -36,6 +34,7 @@ class BackupPhoto:
         self.vk_token = vk_token
         self.disk_token = disk_token
         self.user_id = user_id
+        self.headers = {'Authorization': f'OAuth {disk_token}'}
 
     def get_photos(self):
         params = {
@@ -49,52 +48,56 @@ class BackupPhoto:
         response = requests.get(f"{self.VK_BASE_URL}/photos.get", params=params)
         return response.json()
 
+    def mkdir_on_disk(self):
+        requests.put(self.DISK_BASE_URL,
+                     params={'path': 'BackupPhotosVK'},
+                     headers=self.headers)
+        
+    def search_for_larger_size(self):
+        image_json = self.get_photos()['response']
+        return image_json
+    
+    def filename(self, i):
+        image_json = self.search_for_larger_size()
+        filename = [f"{image_json['items'][i]['likes']['count']}",
+                    f"{datetime.now().strftime('%d-%m-%y_%H-%M-%S')}"]
+        return filename
+        
+    def test_response(self, filename):
+        request_path = f'BackupPhotosVK/{filename[0]}'
+        response = requests.get(f"{self.DISK_BASE_URL}/upload",
+                                params={'path': request_path},
+                                headers=self.headers)
+        if 'href' not in response.json():
+            request_path = f"BackupPhotosVK/{'@'.join(filename)}"
+            response = requests.get(f"{self.DISK_BASE_URL}/upload",
+                                    params={'path': request_path},
+                                    headers=self.headers)
+        return response.json()['href'], request_path
+
     def backup(self, n=5):
         data = {'files': []}
-        headers = {
-            'Authorization': f'OAuth {self.disk_token}'
-        }
-        image_json = self.get_photos()['response']
+        image_json = self.search_for_larger_size()
+        self.mkdir_on_disk()
         if image_json['count'] < n:
             n = image_json['count']
             print(f'Only {n} images found')
 
-        requests.put(self.DISK_BASE_URL,
-                     params={'path': 'BackupPhotosVK'},
-                     headers=headers)
-
         for i in tqdm(range(n)):
             sizes = {image_json['items'][i]['orig_photo']['height']: (image_json['items'][i]['orig_photo']['url'],
                                                                       'base')}
-            filename = [f"{image_json['items'][i]['likes']['count']}",
-                        f"{datetime.now().strftime('%d-%m-%y_%H-%M-%S')}"]
-                
+            filename = self.filename(i)
             for j in image_json['items'][i]['sizes']:
                 sizes.update({j['height']: (j['url'],
                                             j['type'])})
-
             photo = requests.get(sizes[max(sizes)][0]).content
-            request_path = f'BackupPhotosVK/{filename[0]}'
-            response = requests.get(f"{self.DISK_BASE_URL}/upload",
-                                    params={'path': request_path},
-                                    headers=headers)
-                
-            url_for_upload = response.json()
-            if 'href' not in url_for_upload:
-                request_path = f"BackupPhotosVK/{'@'.join(filename)}"
-                response = requests.get(f"{self.DISK_BASE_URL}/upload",
-                                        params={'path': request_path},
-                                        headers=headers)
-                    
-            url_for_upload = response.json()['href']
-            requests.put(url_for_upload,
+            url_and_path = self.test_response(filename)
+            requests.put(url_and_path[0],
                          files={'file': photo})
-                
             data['files'].append({
-                'filename': f"{request_path.split('/')[1]}.jpg",
+                'filename': f"{url_and_path[1].split('/')[1]}.jpg",
                 'size': sizes[max(sizes)][1]
                 })
-
         pprint(data)
 
 
