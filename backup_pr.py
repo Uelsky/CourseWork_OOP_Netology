@@ -46,24 +46,16 @@ class BackupPhoto:
             'v': '5.199',
         }
         response = requests.get(f"{self.VK_BASE_URL}/photos.get", params=params)
-        return response.json()
+        return response.json()['response']
 
     def mkdir_on_disk(self):
         requests.put(self.DISK_BASE_URL,
                      params={'path': 'BackupPhotosVK'},
                      headers=self.headers)
-        
-    def search_for_larger_size(self):
-        image_json = self.get_photos()['response']
-        return image_json
     
-    def filename(self, i):
-        image_json = self.search_for_larger_size()
-        filename = [f"{image_json['items'][i]['likes']['count']}",
+    def make_url_for_backup(self, images_json, item):
+        filename = [f"{images_json['items'][item]['likes']['count']}",
                     f"{datetime.now().strftime('%d-%m-%y_%H-%M-%S')}"]
-        return filename
-        
-    def test_response(self, filename):
         request_path = f'BackupPhotosVK/{filename[0]}'
         response = requests.get(f"{self.DISK_BASE_URL}/upload",
                                 params={'path': request_path},
@@ -75,32 +67,30 @@ class BackupPhoto:
                                     headers=self.headers)
         return response.json()['href'], request_path
 
-    def backup(self, n=5):
-        data = {'files': []}
-        image_json = self.search_for_larger_size()
-        self.mkdir_on_disk()
-        if image_json['count'] < n:
-            n = image_json['count']
-            print(f'Only {n} images found')
-
-        for i in tqdm(range(n)):
-            sizes = {image_json['items'][i]['orig_photo']['height']: (image_json['items'][i]['orig_photo']['url'],
-                                                                      'base')}
-            filename = self.filename(i)
-            for j in image_json['items'][i]['sizes']:
-                sizes.update({j['height']: (j['url'],
-                                            j['type'])})
-            photo = requests.get(sizes[max(sizes)][0]).content
-            url_and_path = self.test_response(filename)
-            requests.put(url_and_path[0],
-                         files={'file': photo})
-            data['files'].append({
-                'filename': f"{url_and_path[1].split('/')[1]}.jpg",
-                'size': sizes[max(sizes)][1]
-                })
-        pprint(data)
+    @staticmethod
+    def to_disk(url, file):
+        requests.put(url[0],
+                     files={'file': file})
 
 
 if __name__ == '__main__':
     vk_client = BackupPhoto(VK_TOKEN, DISK_TOKEN, USER_ID)
-    vk_client.backup(count)
+    image_json = vk_client.get_photos()['response']
+    vk_client.mkdir_on_disk()
+    if image_json['count'] < count:
+        count = image_json['count']
+        print(f'Only {count} images found')
+    for i in tqdm(range(count)):
+        data = {'files': []}
+        sizes = dict()
+        for j in image_json['items'][i]['sizes']:
+            sizes.update({j['height']: (j['url'],
+                                        j['type'])})
+        photo = requests.get(sizes[max(sizes)][0]).content
+        url_and_name = vk_client.make_url_for_backup(image_json, i)
+        vk_client.to_disk(url_and_name, photo)
+        data['files'].append({
+            'filename': f"{url_and_name[1].split('/')[1]}.jpg",
+            'size': sizes[max(sizes)][1]
+        })
+        pprint(data)
